@@ -72,6 +72,7 @@ arm_ss.add(files(
   'irq_dispatcher.c',
   'tegra2.c',
   'tegrax1.c',
+  'tegra186.c',
   'trace.c',
 
   'dummyio/dummyio.c',

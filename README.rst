@@ -81,6 +81,29 @@ Actual GPU rendering will not be supported. Playing commercial titles with graph
 
 See also QEMU docs regarding secrets input / cmdline arguments.
 
+=============
+Run Tegra 186
+=============
+
+.. code-block:: shell
+
+  export TEGRA_ROOTFS_IMG="/path/to/rootfs.img"
+  ./qemu-system-aarch64 \
+      -M tegra186 \
+      -kernel Image-4.9.299-tegra \
+      -dtb tegra186_qemu.dtb \
+      -m 4096M -smp 4 \
+      -append "earlycon=uart8250,mmio32,0x031f0000 console=ttyS0 root=/dev/vblkdev0 rootfstype=ext4 ro init=/sbin/init rootwait" \
+      -nographic
+
+* Uses ``-M tegra186`` for Tegra Parker / T186 emulation (4x Cortex-A57, GICv2, 8250 MMIO UART @ 0x031F0000, PSCI v1.1).
+
+* Emulates NVIDIA hypervisor (``tegra_hv``) via generic ARM HVC traps (HVC #2, #3, #5, #10), providing synthesized IVC info pages, channel queues (channels 66, 67, 104, 113), and DMA carveouts.
+
+* Implements the ``tegra_hv_vblk`` virtual block device protocol on IVC channel 66, allowing guest Linux to mount an ext4 rootfs (``/dev/vblkdev0``). Point to your ext4 image with ``TEGRA_ROOTFS_IMG`` (defaults to ``rootfs_ext4.img``).
+
+* For comprehensive setup, testing instructions, and reverse-engineered hypervisor ABI details, see ``README_TEGRA186.md`` and ``docs/tegra_hv_ivc_abi.md``.
+
 ===========
 QEMU README
 ===========
