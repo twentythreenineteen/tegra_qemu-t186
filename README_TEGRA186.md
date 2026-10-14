@@ -70,9 +70,75 @@ export TEGRA_ROOTFS_IMG="/path/to/rootfs_ext4.img"
 
 The vblk backend reads from the ext4 image path specified by the `TEGRA_ROOTFS_IMG` environment variable (defaults to `rootfs_ext4.img` in the working directory if unset).
 
+### dm-verity boot (verified rootfs)
+
+The tegra186 port supports **full dm-verity** boot — the kernel verifies every
+block of the rootfs against a SHA-256 hash tree before mounting. This matches
+the NVIDIA factory boot flow where the bootloader passes `dm=` kernel arguments
+to set up a device-mapper verity target.
+
+#### Two boot modes
+
+| Mode | Flag | Root device | Bootargs |
+|---|---|---|---|
+| Direct ext4 (default) | *(none)* | `/dev/vblkdev0` | `root=/dev/vblkdev0 rootfstype=ext4 ro` |
+| dm-verity | `--verity` | `/dev/dm-0` | `dm="1 vroot none ro 1,0 ... verity 1 /dev/vblkdev0p1 /dev/vblkdev0p2 4096 4096 ... sha256 <root_hash> <salt> 1 check_at_most_once" root=/dev/dm-0 gpt` |
+
+#### Building a verity disk image
+
+Use `tools/build_verity_disk.py` to assemble a GPT-partitioned disk image from
+a raw ext4 data image and a dm-verity hash tree image:
+
+```bash
+python3 tools/build_verity_disk.py \
+    /path/to/data_ext4.img \
+    /path/to/verity_hash.img \
+    /path/to/verity_disk.img
+```
+
+The resulting image has:
+- **Partition 1**: ext4 data (the rootfs content)
+- **Partition 2**: dm-verity hash tree (raw, no superblock)
+- Standard GPT layout (protective MBR, primary/backup GPT headers)
+
+#### Launching with dm-verity
+
+```bash
+export ROOTFS=/path/to/verity_disk.img
+./launch_tegra186.sh --verity
+```
+
+The launch script automatically:
+1. Enables 512-byte sector mode (`TEGRA_VBLK_SECTOR_MODE=1`) so the kernel's
+   GPT partition scanner works correctly.
+2. Computes `TEGRA_VBLK_TOTAL_BLOCKS` from the disk image size in 512-byte
+   sectors (so the vblk backend reports correct disk geometry to the guest).
+3. Sets `dm=` kernel bootargs with the factory root hash and salt.
+4. Sets `root=/dev/dm-0` so the kernel mounts the verified device.
+
+Override the factory hash/salt via environment variables:
+```bash
+export VERITY_ROOT_HASH="<your_root_hash>"
+export VERITY_SALT="<your_salt>"
+./launch_tegra186.sh --verity
+```
+
+#### How it works
+
+- QEMU serves the GPT disk image via the `tegra_hv_vblk` virtual block device.
+- In verity mode, the vblk backend uses **512-byte sector mode**
+  (`TEGRA_VBLK_SECTOR_MODE=1`) so the kernel's GPT partition scanner can
+  correctly read partition table entries at 512-byte boundaries.
+- The guest kernel parses GPT partitions (`CONFIG_EFI_PARTITION=y`), creating
+  `/dev/vblkdev0p1` (data) and `/dev/vblkdev0p2` (hash tree).
+- The `dm=` bootargs instruct the kernel's built-in device-mapper to create a
+  `verity` target (`/dev/dm-0`) that transparently verifies each 4K block
+  against the SHA-256 hash tree before passing it to the ext4 filesystem.
+- **No QEMU-side crypto is needed** — all verification happens in the guest kernel.
+
 ## Testing
 
-A 15-test E2E regression suite is included:
+A 16-test E2E regression suite is included:
 
 ```bash
 bash tests/tegra186_e2e/run_all_tests.sh

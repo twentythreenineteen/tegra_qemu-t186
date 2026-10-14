@@ -20,3 +20,13 @@ GTAGS
 *.swp
 *.patch
 *.gcov
+
+# Tegra186 local artifacts
+/build.log
+/configure.log
+/*.img
+/verity_disk.img
+rootfs_ext4.img
+Image-4.9.299-tegra
+*.dtb
+

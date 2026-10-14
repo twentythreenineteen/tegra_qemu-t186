@@ -95,6 +95,7 @@ add_tier1() {
         "${SCRIPT_DIR}/tier1_feature_coverage/test_t1_4_ivc_reservation.sh"
         "${SCRIPT_DIR}/tier1_feature_coverage/test_t1_5_vblk_device.sh"
         "${SCRIPT_DIR}/tier1_feature_coverage/test_t1_6_rootfs_mount.sh"
+        "${SCRIPT_DIR}/tier1_feature_coverage/test_t1_7_verity_boot.sh"
     )
 }
 

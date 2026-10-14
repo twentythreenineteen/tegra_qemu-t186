@@ -104,6 +104,25 @@ Run Tegra 186
 
 * For comprehensive setup, testing instructions, and reverse-engineered hypervisor ABI details, see ``README_TEGRA186.md`` and ``docs/tegra_hv_ivc_abi.md``.
 
+**dm-verity boot (verified rootfs)**
+
+The tegra186 port supports full dm-verity boot via the ``--verity`` flag on ``launch_tegra186.sh``:
+
+.. code-block:: shell
+
+  # Build a GPT disk image from data + hash images
+  python3 tools/build_verity_disk.py /path/to/data.img /path/to/hash.img /path/to/verity_disk.img
+
+  # Boot with dm-verity verification (root=/dev/dm-0)
+  export ROOTFS=/path/to/verity_disk.img
+  ./launch_tegra186.sh --verity
+
+In verity mode, the vblk backend uses 512-byte sector mode so the kernel's GPT
+partition scanner finds ``/dev/vblkdev0p1`` (data) and ``/dev/vblkdev0p2`` (hash tree).
+The kernel's device-mapper creates a ``verity`` target (``/dev/dm-0``) that verifies
+each block against the SHA-256 hash tree before mounting. See ``README_TEGRA186.md``
+for full details.
+
 ===========
 QEMU README
 ===========

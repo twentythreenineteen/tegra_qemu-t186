@@ -107,11 +107,11 @@ struct QEMU_PACKED tegra_hv_vblk_config_resp_frame {
     uint32_t status;          /* +0x1c: 0 (success) */
     uint32_t rsvd1;           /* +0x20: 0 */
     uint32_t dev_type;        /* +0x24: 1 (block device) */
-    uint32_t block_size;      /* +0x28: 512 */
-    uint32_t max_read_blocks; /* +0x2c: 128 */
-    uint32_t max_write_blocks;/* +0x30: 128 */
-    uint32_t flags;           /* +0x34: 1 (writable) */
-    uint64_t total_blocks;    /* +0x38: 24035328ULL */
+    uint32_t block_size;      /* +0x28: 4096 (TEGRA_HV_VBLK_BLOCK_SIZE) */
+    uint32_t max_read_blocks; /* +0x2c: 16 (TEGRA_HV_VBLK_MAX_BLOCKS) */
+    uint32_t max_write_blocks;/* +0x30: 16 (TEGRA_HV_VBLK_MAX_BLOCKS) */
+    uint32_t flags;           /* +0x34: 0x0f (rw + flushable) */
+    uint64_t total_blocks;    /* +0x38: 4K-block count (default 3004416, overridable via TEGRA_VBLK_TOTAL_BLOCKS env) */
 };
 
 struct QEMU_PACKED tegra_hv_vblk_io_resp_frame {

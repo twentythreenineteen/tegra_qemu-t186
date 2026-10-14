@@ -24,6 +24,42 @@ static uint8_t *s_mempool9_ptr = NULL;
 static qemu_irq s_ivc66_irq = NULL;
 static int s_rootfs_fd = -1;
 static QEMUTimer *s_vblk_timer = NULL;
+static uint64_t s_total_blocks = TEGRA_HV_VBLK_TOTAL_BLOCKS;
+static bool s_sector_mode = false;
+
+static uint64_t tegra186_hv_get_total_blocks(void)
+{
+    const char *env = getenv("TEGRA_VBLK_TOTAL_BLOCKS");
+    if (env && env[0]) {
+        uint64_t val = strtoull(env, NULL, 0);
+        if (val > 0) {
+            return val;
+        }
+    }
+    return s_total_blocks;
+}
+
+/*
+ * Sector mode: when enabled (TEGRA_VBLK_SECTOR_MODE=1), the vblk device
+ * reports block_size=512 and total_blocks in 512-byte sectors. This is
+ * required for GPT partition scanning, which the kernel performs using
+ * 512-byte sector reads. In default mode (4K blocks), partition scanning
+ * reads the wrong offsets and fails to find partitions.
+ */
+static bool tegra186_hv_get_sector_mode(void)
+{
+    const char *env = getenv("TEGRA_VBLK_SECTOR_MODE");
+    if (env && env[0]) {
+        return (strcmp(env, "1") == 0 || strcmp(env, "true") == 0 ||
+                strcmp(env, "yes") == 0);
+    }
+    return s_sector_mode;
+}
+
+static uint32_t tegra186_hv_get_block_size(void)
+{
+    return tegra186_hv_get_sector_mode() ? 512 : TEGRA_HV_VBLK_BLOCK_SIZE;
+}
 
 static void tegra186_vblk_timer_cb(void *opaque)
 {
@@ -227,16 +263,27 @@ void tegra186_hv_process_channel66(void)
             resp->type = 2;
             resp->status = 0;
             resp->dev_type = TEGRA_HV_VBLK_DEV_TYPE_BLOCK; /* 1 */
-            resp->block_size = TEGRA_HV_VBLK_BLOCK_SIZE;   /* 4096 */
-            resp->max_read_blocks = TEGRA_HV_VBLK_MAX_BLOCKS; /* 16 */
-            resp->max_write_blocks = TEGRA_HV_VBLK_MAX_BLOCKS; /* 16 */
+            resp->block_size = tegra186_hv_get_block_size();
+            if (tegra186_hv_get_sector_mode()) {
+                /* 512-byte sectors: 8 sectors = 4096 bytes per transfer */
+                resp->max_read_blocks = TEGRA_HV_VBLK_BLOCK_SIZE / 512;  /* 8 */
+                resp->max_write_blocks = TEGRA_HV_VBLK_BLOCK_SIZE / 512; /* 8 */
+            } else {
+                resp->max_read_blocks = TEGRA_HV_VBLK_MAX_BLOCKS; /* 16 */
+                resp->max_write_blocks = TEGRA_HV_VBLK_MAX_BLOCKS; /* 16 */
+            }
             resp->flags = 0x0f; /* bits 0..3: writable, readable, writable, flushable */
-            resp->total_blocks = TEGRA_HV_VBLK_TOTAL_BLOCKS; /* 3004416ULL */
-            info_report("tegra_hv_vblk: registered /dev/vblkdev0 (24035328 sectors, 12017664 KiB)");
+            resp->total_blocks = tegra186_hv_get_total_blocks();
+            info_report("tegra_hv_vblk: registered /dev/vblkdev0 (%llu blocks x %u bytes, %.2f GiB, %s mode)",
+                        (unsigned long long)resp->total_blocks,
+                        resp->block_size,
+                        (double)resp->total_blocks * resp->block_size / (1024.0 * 1024.0 * 1024.0),
+                        tegra186_hv_get_sector_mode() ? "sector" : "4K-block");
         } else if (type == TEGRA_HV_VBLK_CMD_READ) {
+            uint32_t blk_sz = tegra186_hv_get_block_size();
             if (op == TEGRA_HV_VBLK_OP_READ) {
-                size_t bytes = (size_t)num_blocks * TEGRA_HV_VBLK_BLOCK_SIZE;
-                off_t offset = (off_t)start_block * TEGRA_HV_VBLK_BLOCK_SIZE;
+                size_t bytes = (size_t)num_blocks * blk_sz;
+                off_t offset = (off_t)start_block * blk_sz;
                 if (s_mempool9_ptr && mempool_offset + bytes <= TEGRA186_MEMPOOL9_SIZE) {
                     uint8_t *dma_dest = s_mempool9_ptr + mempool_offset;
                     ssize_t nread = 0;
@@ -254,8 +301,8 @@ void tegra186_hv_process_channel66(void)
                                 mempool_offset, bytes);
                 }
             } else if (op == TEGRA_HV_VBLK_OP_WRITE) {
-                size_t bytes = (size_t)num_blocks * TEGRA_HV_VBLK_BLOCK_SIZE;
-                off_t offset = (off_t)start_block * TEGRA_HV_VBLK_BLOCK_SIZE;
+                size_t bytes = (size_t)num_blocks * blk_sz;
+                off_t offset = (off_t)start_block * blk_sz;
                 if (s_mempool9_ptr && mempool_offset + bytes <= TEGRA186_MEMPOOL9_SIZE) {
                     uint8_t *dma_src = s_mempool9_ptr + mempool_offset;
                     if (s_rootfs_fd >= 0) {
