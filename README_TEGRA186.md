@@ -51,7 +51,47 @@ Verify the machine is registered:
 
 ## Running
 
-You need:
+The canonical way to boot is the launch script, which sets all machine,
+bootargs, and device options consistently:
+
+```bash
+export ROOTFS=/path/to/rootfs_ext4.img   # or a verity disk image with --verity
+./launch_tegra186.sh [flags] [extra qemu args...]
+```
+
+| Flag | Meaning | Default |
+|---|---|---|
+| `--verity` | Boot with dm-verity (`root=/dev/dm-0`). See [dm-verity boot](#dm-verity-boot-verified-rootfs). | off (direct ext4, `root=/dev/vblkdev0`) |
+| `--display MODE` | Host display backend: `sdl`, `gtk`, `vnc`, `none`, `cocoa`. | `none` (headless, serial on stdio) |
+| `--usb-disk PATH` | Attach a raw disk image as USB mass storage. | disabled |
+| `--audio` | Attach a USB audio device (`usb-audio`). | disabled |
+| `-t SECONDS` / `--timeout=SECONDS` | Stop the run after N seconds. | none |
+| *anything else* | Passed through to `qemu-system-aarch64` as extra args. | — |
+
+Environment variables: `QEMU` (binary), `KERNEL` (kernel Image), `DTB`
+(device tree blob), `ROOTFS` (rootfs or disk image), `USB_DISK` (same as
+`--usb-disk`), `AUDIO_BACKEND` (`-audiodev` backend for `--audio`, default
+`none`), `VERITY_ROOT_HASH` and `VERITY_SALT` (dm-verity overrides).
+
+The launch script's built-in defaults point at a developer's local layout.
+Always set `QEMU`, `KERNEL`, and `ROOTFS` explicitly for your own machine.
+
+Examples:
+
+```bash
+# Direct ext4 boot, headless
+./launch_tegra186.sh
+
+# dm-verity boot with an SDL display window
+./launch_tegra186.sh --verity --display sdl
+
+# Add a USB mass-storage drive (guest sees /dev/sda) and USB audio
+./launch_tegra186.sh --usb-disk /path/to/usb_disk.img --audio
+```
+
+### Raw QEMU invocation (reference)
+
+The launch script wraps the following. You need:
 1. **Kernel**: `Image-4.9.299-tegra` (NVIDIA L4T 4.9 kernel for T186)
 2. **DTB**: `tegra186_qemu.dtb` (included in this repo, or generate from `tegra186_qemu.dts`)
 3. **Rootfs**: An ext4 image file (e.g., NVIDIA L4T sample rootfs). **Not included** —
@@ -135,6 +175,63 @@ export VERITY_SALT="<your_salt>"
   `verity` target (`/dev/dm-0`) that transparently verifies each 4K block
   against the SHA-256 hash tree before passing it to the ext4 filesystem.
 - **No QEMU-side crypto is needed** — all verification happens in the guest kernel.
+
+## Peripherals
+
+### Host display (`--display`)
+
+`--display MODE` selects the QEMU display backend: `sdl`, `gtk`, `vnc`,
+`none`, or `cocoa` (cocoa is macOS-only). The default is `none`, which is
+headless with the serial console on stdio. Any value other than these is
+rejected by the launch script.
+
+### USB mass storage (`--usb-disk PATH`)
+
+`--usb-disk PATH` attaches a raw disk image as a `usb-storage` device on the
+existing XHCI USB 3.0 controller. The guest should see it as `/dev/sdX`
+(typically `/dev/sda`). The flag is disabled unless a path is given. The
+`USB_DISK` environment variable is equivalent.
+
+This only attaches the storage device. USB host enumeration and bring-up on
+the XHCI controller are owned by the separate USB/host-emulation workstream.
+
+### USB audio (`--audio`)
+
+`--audio` attaches a `usb-audio` device (a USB sound card) to the XHCI bus.
+It is **off by default**. USB host enumeration on XHCI is not yet confirmed
+working, so audio stays opt-in until that is validated.
+
+The host backend is chosen with `AUDIO_BACKEND` (default `none`, a silent null
+backend that needs no host audio device). The script emits
+`-audiodev ${AUDIO_BACKEND},id=usbaudio0`, so `AUDIO_BACKEND=wav` selects QEMU's
+wav backend. The script does not set a wav output path, so custom capture
+paths are not wired in yet; that would need a script change.
+
+## Guest-side tools: openccnc_vnc
+
+`tools/openccnc_vnc/` contains guest payloads for screen capture, touch
+injection, and a browser web UI. **These run INSIDE the Tegra186 guest, not on
+the QEMU host.** They are not a host-side VNC server.
+
+| Script | Role |
+|---|---|
+| `frame_server.py` | Captures frames from the guest Wayland socket and serves them over HTTP, along with a tap/swipe and action UI. |
+| `uinput_touch.py` | Virtual multitouch touchscreen on `/dev/uinput`, stdlib only. |
+| `actions.py` | D-Bus action registry for web UI buttons. |
+| `send_keypress.py` | Sends a key event over D-Bus via `ccos.api.hiac`. |
+
+Dependencies on the guest: Python 3 stdlib, plus `python3-dbus` for the D-Bus
+scripts. See [`tools/openccnc_vnc/README.md`](tools/openccnc_vnc/README.md).
+
+To run inside the guest after copying the directory onto it:
+
+```sh
+# Serve the web UI on port 8080 at 2x downscale
+python3 frame_server.py 8080 2
+
+# Send a single tap at guest pixel coordinates (500, 300)
+python3 uinput_touch.py 500 300
+```
 
 ## Testing
 
